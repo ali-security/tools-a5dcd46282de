@@ -82,7 +82,7 @@ func waitForSearchReady(t *testing.T, addr string) {
 	waitForServer(t,
 		fmt.Sprintf("http://%v/search?q=FALLTHROUGH", addr),
 		"The list of tokens.",
-		2*time.Minute,
+		5*time.Minute, // was 2m; indexing GOROOT on CI runners takes 80-123s
 		false)
 }
 
@@ -90,7 +90,7 @@ func waitUntilScanComplete(t *testing.T, addr string) {
 	waitForServer(t,
 		fmt.Sprintf("http://%v/pkg", addr),
 		"Scan is not yet complete",
-		2*time.Minute,
+		5*time.Minute, // was 2m; indexing GOROOT on CI runners takes 80-123s
 		true,
 	)
 	// setting reverse as true, which means this waits

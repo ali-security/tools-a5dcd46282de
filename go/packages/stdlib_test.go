@@ -6,6 +6,7 @@ package packages_test
 
 import (
 	"bytes"
+	"go/build"
 	"io/ioutil"
 	"path/filepath"
 	"runtime"
@@ -60,6 +61,14 @@ func TestStdlibMetadata(t *testing.T) {
 func TestCgoOption(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping in short mode; uses tons of memory (https://golang.org/issue/14113)")
+	}
+	// net.cgoLookupHost is not defined on windows (no cgo resolver there).
+	if runtime.GOOS == "windows" {
+		t.Skip("net.cgoLookupHost does not exist on windows")
+	}
+	// With cgo disabled go list selects the cgo_stub files, so the native-file check does not apply.
+	if !build.Default.CgoEnabled {
+		t.Skip("cgo is disabled; no native cgo files to load")
 	}
 
 	// TODO(adonovan): see if we can get away without these old

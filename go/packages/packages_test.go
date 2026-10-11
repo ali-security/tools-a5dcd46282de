@@ -26,6 +26,18 @@ import (
 	"golang.org/x/tools/go/packages/packagestest"
 )
 
+// TestMain restricts the packagestest exporters on Windows. With Go 1.12 on
+// Windows the Modules exporter is flaky: `go list` errors are swallowed, so
+// packages.Load returns an empty result and a different subtest indexes into
+// it and panics on each run. The GOPATH exporter is stable there, and the
+// Modules exporter still runs on every other platform.
+func TestMain(m *testing.M) {
+	if runtime.GOOS == "windows" {
+		packagestest.All = []packagestest.Exporter{packagestest.GOPATH}
+	}
+	os.Exit(m.Run())
+}
+
 // TODO(adonovan): more test cases to write:
 //
 // - When the tests fail, make them print a 'cd & load' command
@@ -845,7 +857,7 @@ func testParseFileModifyAST(t *testing.T, exporter packagestest.Exporter) {
 	}
 	initial, err := packages.Load(exported.Config, "golang.org/fake/a")
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
 	// Check value of a.A has been set to "b"

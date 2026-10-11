@@ -1,0 +1,126 @@
+# Sealed build for golang.org/x/tools v0.0.0-20190425150028-36563e24a262.
+# Upstream x/tools has no GitHub Actions CI (it is tested on the Go build
+# farm), so this workflow is authored from scratch: it produces the
+# proxy.golang.org module zip and runs the module's full `go test ./...`
+# suite on Linux and Windows with Go 1.12 (the toolchain of April 2019).
+name: seal-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: "Optional go test package/selector arguments; empty runs ./..."
+        required: false
+        default: ""
+
+jobs:
+  module-zip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: false
+
+      - name: Stage module tree (without .git and .github)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/modsrc"
+          # .github holds only this workflow and the zip helper; keep both out of the module zip.
+          tar --exclude=.git --exclude=.github -cf - . | tar -xf - -C "$RUNNER_TEMP/modsrc"
+          ls -la "$RUNNER_TEMP/modsrc"
+
+      - name: Build x/mod zip helper
+        env:
+          GOFLAGS: -mod=mod
+        run: |
+          set -euo pipefail
+          HELPER_DIR="$(mktemp -d)"
+          cp .github/create_mod/main.go "$HELPER_DIR/main.go"
+          cd "$HELPER_DIR"
+          go mod init helper
+          go get golang.org/x/mod@v0.24.0
+          go build -o "$RUNNER_TEMP/create_mod" .
+
+      - name: Create module zip
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          "$RUNNER_TEMP/create_mod" "$RUNNER_TEMP/modsrc" out/v0.0.0-20190425150028-36563e24a262.zip
+          unzip -l out/v0.0.0-20190425150028-36563e24a262.zip | tail -1
+          sha256sum out/v0.0.0-20190425150028-36563e24a262.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: module-zip
+          path: out/v0.0.0-20190425150028-36563e24a262.zip
+          if-no-files-found: error
+
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      GO111MODULE: "on"
+      GOPROXY: https://proxy.golang.org
+      GOFLAGS: ""
+      # Go 1.12's runtime/cgo needs __imp___iob_func, which the Windows runner's modern mingw lacks.
+      CGO_ENABLED: ${{ matrix.os == 'windows-latest' && '0' || '1' }}
+    steps:
+      - name: Keep LF line endings (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.12.17"
+          cache: false
+
+      - name: Use runner temp dir (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Go version
+        run: |
+          go version
+          go env
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            # cmd/splitdwarf is +build !windows (only doc.go remains, no main func).
+            go build $(go list ./... | grep -v '/cmd/splitdwarf$')
+          else
+            go build ./...
+          fi
+
+      - name: Test
+        run: |
+          set -o pipefail
+          go test -p 1 -v ${{ inputs.test-filter || './...' }} 2>&1 | tee test.log
+
+      - name: Test summary
+        if: always()
+        run: |
+          awk '
+            /--- PASS/ { pass++ }
+            /--- FAIL/ { fail++ }
+            /--- SKIP/ { skip++ }
+            /^ok /     { pkgok++ }
+            /^FAIL/    { pkgfail++ }
+            END { printf "TEST SUMMARY: passed=%d failed=%d skipped=%d packages_ok=%d packages_failed=%d\n", pass, fail, skip, pkgok, pkgfail }
+          ' test.log

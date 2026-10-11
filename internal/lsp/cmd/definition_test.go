@@ -44,7 +44,8 @@ func TestDefinitionHelpExample(t *testing.T) {
 	}
 	thisFile := filepath.Join(dir, "definition.go")
 	baseArgs := []string{"query", "definition"}
-	expect := regexp.MustCompile(`^[\w/\\:_-]+flag[/\\]flag.go:\d+:\d+-\d+: defined here as type flag.FlagSet struct{.*}$`)
+	// "." allowed in the path: setup-go GOROOTs contain dots (e.g. /go/1.12.17/x64/).
+	expect := regexp.MustCompile(`^[\w/\\:._-]+flag[/\\]flag.go:\d+:\d+-\d+: defined here as type flag.FlagSet struct{.*}$`)
 	for _, query := range []string{
 		fmt.Sprintf("%v:%v:%v", thisFile, cmd.ExampleLine, cmd.ExampleColumn),
 		fmt.Sprintf("%v:#%v", thisFile, cmd.ExampleOffset)} {
