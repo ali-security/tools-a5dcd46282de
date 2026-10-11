@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"unicode"
 )
@@ -59,5 +60,20 @@ func TestAppendQuote(t *testing.T) {
 	}
 	if got, want := in2, in.String(); got != want {
 		t.Fatal("AppendQuote modified string") // no point printing got/want: huge
+	}
+}
+
+// TestJQueryNoSelfClosingTagExpansion ensures the bundled jQuery does not
+// rewrite self-closing tags (e.g. "<style/>") into open/close pairs before
+// inserting HTML into the DOM. That expansion lets sanitized markup such as
+// "<style><style/><img src=x onerror=alert(1)>" turn into executable script
+// when passed to .html()/.append() (CVE-2020-11022, CVE-2020-11023).
+func TestJQueryNoSelfClosingTagExpansion(t *testing.T) {
+	js, ok := Files["jquery.js"]
+	if !ok {
+		t.Fatal("jquery.js missing from static files")
+	}
+	if strings.Contains(js, `"<$1></$2>"`) {
+		t.Error(`jquery.js expands self-closing tags with "<$1></$2>"; HTML passed to DOM manipulation methods is not safe`)
 	}
 }
