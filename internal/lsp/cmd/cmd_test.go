@@ -5,10 +5,13 @@
 package cmd_test
 
 import (
+	"context"
 	"io/ioutil"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/tools/go/packages/packagestest"
 	"golang.org/x/tools/internal/lsp/cmd"
@@ -37,6 +40,50 @@ func testCommandLine(t *testing.T, exporter packagestest.Exporter) {
 		},
 	}
 	tests.Run(t, r, data)
+}
+
+// TestServeNoPortFlag checks that the serve verb no longer has a -port flag,
+// which listened on all network interfaces.
+func TestServeNoPortFlag(t *testing.T) {
+	typ := reflect.TypeOf(cmd.Serve{})
+	for i := 0; i < typ.NumField(); i++ {
+		if field := typ.Field(i); field.Tag.Get("flag") == "port" {
+			t.Errorf("Serve.%s provides a -port flag, which binds all network interfaces", field.Name)
+		}
+	}
+}
+
+// runServe runs the serve verb with -listen=addr, failing the test if it does
+// not return in time (i.e. it is listening for connections).
+func runServe(t *testing.T, addr string) error {
+	app := &cmd.Application{}
+	app.Serve.Address = addr
+	errc := make(chan error, 1)
+	go func() { errc <- cmd.RunServe(context.Background(), app) }()
+	select {
+	case err := <-errc:
+		return err
+	case <-time.After(10 * time.Second):
+		t.Fatalf("-listen=%s: server is listening, want it to return an error", addr)
+		return nil
+	}
+}
+
+// TestServeListenImplicitAllInterfaces checks that -listen rejects addresses
+// with an empty host, which would silently bind all network interfaces.
+func TestServeListenImplicitAllInterfaces(t *testing.T) {
+	const want = "implicitly binds all network interfaces"
+	for _, addr := range []string{":0", ":12345"} {
+		err := runServe(t, addr)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("-listen=%s: got error %v, want %q", addr, err, want)
+		}
+	}
+	// An explicit host is not rejected; an invalid port makes the
+	// listener fail without accepting connections.
+	if err := runServe(t, "127.0.0.1:99999"); err == nil || strings.Contains(err.Error(), want) {
+		t.Errorf("-listen=127.0.0.1:99999: got error %v, want a listen error", err)
+	}
 }
 
 func (r *runner) Completion(t *testing.T, data tests.Completions, items tests.CompletionItems) {
